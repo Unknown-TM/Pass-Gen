@@ -7,11 +7,57 @@ import tkinter as tk
 from tkinter import messagebox
 import pyperclip  
 import zxcvbn  
+from supabase import create_client  # Added for Supabase integration
+
+# Supabase configuration - you need to replace these with your actual credentials
+SUPABASE_URL = "YOUR_SUPABASE_URL"
+SUPABASE_KEY = "YOUR_SUPABASE_API_KEY"
+
+# Initialize Supabase client
+def init_supabase():
+    try:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"Error initializing Supabase: {e}")
+        return None
+
+# Function to get existing passwords from the Excel file
+def get_existing_passwords():
+    current_directory = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(current_directory, 'passwords.xlsx')
+    
+    try:
+        df = pd.read_excel(file_path)
+        return df['Password'].tolist()
+    except FileNotFoundError:
+        return []
+
+# Function to save password to Supabase
+def save_password_to_supabase(service_name, password, timestamp):
+    supabase = init_supabase()
+    if not supabase:
+        messagebox.showerror("Error", "Could not connect to Supabase. Password saved to Excel only.")
+        return False
+    
+    try:
+        data = {
+            "service": service_name,
+            "password": password,
+            "created_at": timestamp
+        }
+        supabase.table("passwords").insert(data).execute()
+        return True
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to save to Supabase: {str(e)}")
+        return False
 
 #  generate the password
 def generate_password():
-
     service_name = service_name_entry.get()
+    if not service_name:
+        messagebox.showwarning("Input Error", "Please enter where you're using this password.")
+        return
+        
     length = length_slider.get()
     include_lower = lower_var.get()
     include_upper = upper_var.get()
@@ -21,28 +67,81 @@ def generate_password():
     if not (include_lower or include_upper or include_digits or include_special):
         messagebox.showwarning("Input Error", "Please select at least one password complexity option.")
         return
-    all_characters = ""
-    if include_lower:
-        all_characters += string.ascii_lowercase
-    if include_upper:
-        all_characters += string.ascii_uppercase
-    if include_digits:
-        all_characters += string.digits
-    if include_special:
-        all_characters += string.punctuation.replace(' ', '')
-    password = ''.join(random.choice(all_characters) for _ in range(length))
+    
+    # Get list of existing passwords
+    existing_passwords = get_existing_passwords()
+    
+    # Generate a unique password
+    max_attempts = 100  # Prevent infinite loop in extreme cases
+    attempts = 0
+    
+    while attempts < max_attempts:
+        all_characters = ""
+        if include_lower:
+            all_characters += string.ascii_lowercase
+        if include_upper:
+            all_characters += string.ascii_uppercase
+        if include_digits:
+            all_characters += string.digits
+        if include_special:
+            all_characters += string.punctuation.replace(' ', '')
+            
+        password = ''.join(random.choice(all_characters) for _ in range(length))
+        
+        # Check if password is unique
+        if password not in existing_passwords:
+            break
+            
+        attempts += 1
+    
+    if attempts == max_attempts:
+        messagebox.showwarning("Generation Error", "Could not generate a unique password. Please try different parameters.")
+        return
 
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    save_password_to_excel(service_name, password, timestamp)
+    # Ask where to save the password
+    save_location_window = tk.Toplevel(root)
+    save_location_window.title("Save Location")
+    save_location_window.geometry("300x150")
+    save_location_window.transient(root)
+    save_location_window.grab_set()
+    
+    tk.Label(save_location_window, text="Where do you want to save this password?").pack(pady=10)
+    
+    save_excel_var = tk.BooleanVar(value=True)
+    save_supabase_var = tk.BooleanVar(value=False)
+    
+    tk.Checkbutton(save_location_window, text="Save to Excel", variable=save_excel_var).pack(anchor="w", padx=20)
+    tk.Checkbutton(save_location_window, text="Save to Supabase", variable=save_supabase_var).pack(anchor="w", padx=20)
+    
+    def on_save_confirm():
+        save_excel = save_excel_var.get()
+        save_supabase = save_supabase_var.get()
+        
+        if not (save_excel or save_supabase):
+            messagebox.showwarning("Input Error", "Please select at least one save location.")
+            return
+        
+        if save_excel:
+            save_password_to_excel(service_name, password, timestamp)
+        
+        if save_supabase:
+            save_password_to_supabase(service_name, password, timestamp)
+        
+        save_location_window.destroy()
+        
+        # Update UI after saving
+        password_label.config(text=f"Generated Password: {password}")
+        password_strength = check_password_strength(password)
+        password_strength_label.config(text=f"Password Strength: {password_strength}")
+        copy_button.config(state=tk.NORMAL)
+        global generated_password
+        generated_password = password
+        security_tips_label.config(text="Security Tip: Use a password manager to store your passwords securely.")
+    
+    tk.Button(save_location_window, text="Save", command=on_save_confirm, width=10).pack(pady=10)
 
-    password_label.config(text=f"Generated Password: {password}")
-    password_strength = check_password_strength(password)
-    password_strength_label.config(text=f"Password Strength: {password_strength}")
-    copy_button.config(state=tk.NORMAL)
-    global generated_password
-    generated_password = password
-    security_tips_label.config(text="Security Tip: Use a password manager to store your passwords securely.")
 def check_password_strength(password):
     strength = zxcvbn.zxcvbn(password)
     score = strength['score']
@@ -57,7 +156,6 @@ def check_password_strength(password):
     return "Unknown"
 
 def save_password_to_excel(service_name, password, timestamp):
-
     current_directory = os.path.dirname(os.path.realpath(__file__))
     file_path = os.path.join(current_directory, 'passwords.xlsx')
 
