@@ -1,4 +1,4 @@
-Password Generator
+Password Generator 
 
 A Python-based password generator that allows users to create strong, secure, and customizable passwords. The application features options for password length, character complexity, and stores the generated passwords in an Excel file for future reference.
 
