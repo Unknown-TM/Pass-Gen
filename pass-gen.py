@@ -11,13 +11,20 @@ from supabase import create_client
 import json
 import hashlib
 import threading
+import logging  # Added logging import
 
 # Configuration
 CONFIG_FILE = "config.json"
 
 # Supabase configuration - you need to replace these with your actual credentials
-SUPABASE_URL = "YOUR_SUPABASE_URL"
-SUPABASE_KEY = "YOUR_SUPABASE_API_KEY"
+SUPABASE_URL = "https://your-project-url.supabase.co"  # Update this with your project URL
+SUPABASE_KEY = "your-anon-key"  # Update this with your anon/public key
+
+# Add table name as a constant
+SUPABASE_TABLE_NAME = "passwords"
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class PasswordManager:
     def __init__(self, root):
@@ -54,8 +61,8 @@ class PasswordManager:
                 }
                 self.save_config(config)
                 return config
-        except Exception as e:
-            print(f"Error loading config: {e}")
+        except json.JSONDecodeError as e:  # Improved error handling
+            logging.error(f"Error loading config: {e}")
             return {
                 "supabase_url": SUPABASE_URL,
                 "supabase_key": SUPABASE_KEY,
@@ -68,8 +75,9 @@ class PasswordManager:
         try:
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(config, f, indent=4)
+            logging.info("Configuration saved successfully.")
         except Exception as e:
-            print(f"Error saving config: {e}")
+            logging.error(f"Error saving config: {e}")
     
     def setup_ui(self):
         # Create a main frame
@@ -212,30 +220,49 @@ class PasswordManager:
     def configure_supabase(self):
         config_window = tk.Toplevel(self.root)
         config_window.title("Supabase Configuration")
-        config_window.geometry("400x200")
+        config_window.geometry("500x250")
         config_window.transient(self.root)
         config_window.grab_set()
         config_window.configure(bg=self.bg_color)
         
-        tk.Label(config_window, text="Supabase URL:", bg=self.bg_color).grid(row=0, column=0, sticky="w", padx=10, pady=10)
-        url_entry = tk.Entry(config_window, width=35)
-        url_entry.grid(row=0, column=1, padx=10, pady=10)
+        # Add instructions
+        instructions = tk.Label(config_window, text="Enter your Supabase project URL and anon/public key\n"
+                              "You can find these in your Supabase project settings.",
+                              bg=self.bg_color, wraplength=450)
+        instructions.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+        
+        tk.Label(config_window, text="Supabase URL:", bg=self.bg_color).grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        url_entry = tk.Entry(config_window, width=45)
+        url_entry.grid(row=1, column=1, padx=10, pady=10)
         url_entry.insert(0, self.config.get("supabase_url", ""))
         
-        tk.Label(config_window, text="Supabase Key:", bg=self.bg_color).grid(row=1, column=0, sticky="w", padx=10, pady=10)
-        key_entry = tk.Entry(config_window, width=35)
-        key_entry.grid(row=1, column=1, padx=10, pady=10)
+        tk.Label(config_window, text="Supabase Key:", bg=self.bg_color).grid(row=2, column=0, sticky="w", padx=10, pady=10)
+        key_entry = tk.Entry(config_window, width=45)
+        key_entry.grid(row=2, column=1, padx=10, pady=10)
         key_entry.insert(0, self.config.get("supabase_key", ""))
         
-        def save_config():
-            self.config["supabase_url"] = url_entry.get()
-            self.config["supabase_key"] = key_entry.get()
-            self.save_config(self.config)
-            self.status_var.set("Supabase configuration saved")
-            config_window.destroy()
+        def save_and_test():
+            self.config["supabase_url"] = url_entry.get().strip()
+            self.config["supabase_key"] = key_entry.get().strip()
+            
+            # Test the connection
+            try:
+                supabase = create_client(self.config["supabase_url"], self.config["supabase_key"])
+                response = supabase.table(SUPABASE_TABLE_NAME).select("*").limit(1).execute()
+                
+                # If we get here, the connection was successful
+                self.save_config(self.config)
+                messagebox.showinfo("Success", "Supabase connection successful!")
+                self.status_var.set("Supabase configuration saved and tested successfully")
+                config_window.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Connection Error", 
+                                   f"Failed to connect to Supabase. Please check your credentials.\n\nError: {str(e)}")
         
-        save_button = tk.Button(config_window, text="Save", command=save_config, bg=self.accent_color, fg="white")
-        save_button.grid(row=2, column=0, columnspan=2, pady=20)
+        save_button = tk.Button(config_window, text="Save and Test Connection", 
+                              command=save_and_test, bg=self.accent_color, fg="white")
+        save_button.grid(row=3, column=0, columnspan=2, pady=20)
     
     def get_existing_passwords(self):
         # Get passwords from Excel
@@ -250,7 +277,7 @@ class PasswordManager:
                     if 'Password' in df.columns:
                         passwords.extend(df['Password'].tolist())
             except Exception as e:
-                print(f"Error reading existing passwords: {e}")
+                logging.error(f"Error reading existing passwords: {e}")
         
         # Get passwords from Supabase
         if self.supabase_var.get() and self.config.get("supabase_url") and self.config.get("supabase_key"):
@@ -260,7 +287,7 @@ class PasswordManager:
                 if response.data:
                     passwords.extend([item.get("password") for item in response.data])
             except Exception as e:
-                print(f"Error fetching passwords from Supabase: {e}")
+                logging.error(f"Error fetching passwords from Supabase: {e}")
         
         return passwords
     
@@ -282,6 +309,7 @@ class PasswordManager:
         
         # Start a loading indicator
         self.status_var.set("Generating password...")
+        logging.info("Generating password for service: %s", service_name)
         
         # Perform the password generation in a separate thread
         threading.Thread(target=self._generate_password_thread, 
@@ -336,6 +364,7 @@ class PasswordManager:
                 self.root.after(0, lambda: messagebox.showwarning("Generation Error", 
                           "Could not generate a unique password. Please try different parameters."))
                 self.root.after(0, lambda: self.status_var.set("Failed to generate unique password"))
+                logging.warning("Failed to generate a unique password after %d attempts.", max_attempts)
                 return
             
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -357,6 +386,7 @@ class PasswordManager:
             self.root.after(0, lambda: self.update_ui(password, save_success))
         except Exception as e:
             self.root.after(0, lambda: self.status_var.set(f"Error: {str(e)}"))
+            logging.error("Error during password generation: %s", str(e))
     
     def update_ui(self, password, save_success):
         self.generated_password = password
@@ -378,8 +408,10 @@ class PasswordManager:
         
         if save_success:
             self.status_var.set("Password generated and saved successfully")
+            logging.info("Password generated and saved successfully for service: %s", self.service_name_entry.get())
         else:
             self.status_var.set("Password generated but there were issues saving it")
+            logging.warning("Password generated but there were issues saving it.")
     
     def check_password_strength(self, password):
         strength = zxcvbn.zxcvbn(password)
@@ -416,6 +448,7 @@ class PasswordManager:
             
             try:
                 df.to_excel(file_path, index=False)
+                logging.info("Password saved to Excel successfully.")
                 return True
             except PermissionError:
                 self.root.after(0, lambda: messagebox.showerror("Error", 
@@ -423,10 +456,12 @@ class PasswordManager:
                 return False
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to save to Excel: {str(e)}"))
+                logging.error("Failed to save to Excel: %s", str(e))
                 return False
                 
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Excel error: {str(e)}"))
+            logging.error("Excel error: %s", str(e))
             return False
     
     def save_password_to_supabase(self, service_name, password, timestamp):
@@ -434,65 +469,61 @@ class PasswordManager:
             self.root.after(0, lambda: messagebox.showerror("Error", 
                       "Supabase not configured. Please configure Supabase first."))
             return False
-        
+
         try:
+            # Initialize Supabase client
             supabase = create_client(self.config["supabase_url"], self.config["supabase_key"])
             
-            # Debug info - print configuration
-            print(f"Supabase URL: {self.config['supabase_url']}")
-            print(f"Using API key: {self.config['supabase_key'][:5]}...")
-            
-            # Hash the password for anonymous storage
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-            
+            # Create a simplified data structure
             data = {
                 "service": service_name,
                 "password": password,
-                "password_hash": password_hash,
-                "created_at": timestamp,
-                "is_public": True
+                "created_at": timestamp
             }
             
-            # Debug info - print what we're sending
-            print(f"Sending data to Supabase: {data}")
-            
             try:
-                response = supabase.table("passwords").insert(data).execute()
-                # Debug info - print full response
-                print(f"Supabase response: {response}")
+                # Insert data into Supabase
+                response = supabase.table(SUPABASE_TABLE_NAME).insert(data).execute()
                 
-                if hasattr(response, 'error') and response.error:
-                    error_msg = str(response.error)
-                    print(f"ERROR: {error_msg}")
+                if hasattr(response, 'data') and response.data:
+                    logging.info("Password saved to Supabase successfully")
+                    return True
+                else:
+                    error_msg = getattr(response, 'error', 'Unknown error occurred')
+                    logging.error("Supabase Error: %s", error_msg)
                     self.root.after(0, lambda: messagebox.showerror("Supabase Error", 
-                              f"Detailed error: {error_msg}"))
+                              f"Failed to save password: {error_msg}"))
                     return False
-                return True
+                    
             except Exception as e:
                 error_msg = str(e)
-                print(f"EXCEPTION: {error_msg}")
+                logging.error("Supabase insertion error: %s", error_msg)
                 
                 if "new row violates row-level security policy" in error_msg:
-                    self.root.after(0, lambda: messagebox.showerror("RLS Error", 
-                            "Row-level security policy error. Go to your Supabase dashboard → "
-                            "Table editor → passwords table → Policies → "
-                            "Enable insert for all users or disable RLS temporarily."))
+                    self.root.after(0, lambda: messagebox.showerror("Supabase Error", 
+                            "Row Level Security (RLS) error. Please ensure:\n\n"
+                            "1. RLS is disabled for the passwords table, or\n"
+                            "2. You have proper insert policies configured\n\n"
+                            "Go to Supabase Dashboard → Authentication → Policies to configure."))
                 else:
                     self.root.after(0, lambda: messagebox.showerror("Supabase Error", 
-                              f"Detailed error: {error_msg}"))
+                              f"Failed to save password: {error_msg}"))
                 return False
+                
         except Exception as e:
-            print(f"Connection error: {str(e)}")
+            logging.error("Supabase connection error: %s", str(e))
             self.root.after(0, lambda: messagebox.showerror("Connection Error", 
-                          f"Could not connect to Supabase: {str(e)}"))
+                          f"Could not connect to Supabase. Please check your configuration and internet connection.\n\nError: {str(e)}"))
             return False
     
     def copy_password(self):
         if self.generated_password:
             pyperclip.copy(self.generated_password)
             self.status_var.set("Password copied to clipboard!")
+            logging.info("Password copied to clipboard.")
         else:
             self.status_var.set("No password to copy")
+            logging.warning("Attempted to copy but no password was generated.")
     
     def clear_all(self):
         self.service_name_entry.delete(0, tk.END)
@@ -506,6 +537,21 @@ class PasswordManager:
         self.strength_var.set("")
         self.generated_password = ""
         self.status_var.set("Ready")
+        logging.info("Cleared all fields.")
+
+    def test_supabase_connection(self):
+        try:
+            supabase = create_client(self.config["supabase_url"], self.config["supabase_key"])
+            response = supabase.table("passwords").select("*").execute()
+            if response.data:
+                logging.info("Successfully connected to Supabase.")
+                return True
+            else:
+                logging.error("No data returned from Supabase.")
+                return False
+        except Exception as e:
+            logging.error("Connection error: %s", str(e))
+            return False
 
 if __name__ == "__main__":
     root = tk.Tk()
