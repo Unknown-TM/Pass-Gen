@@ -36,8 +36,8 @@ Created by: **Unknown-TM**
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/password-generator.git
-   cd password-generator
+   git clone https://github.com/Unknown-TM/Pass-Gen.git
+   cd Pass-Gen
    ```
 
 2. Install dependencies:
