@@ -125,3 +125,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [pandas](https://pandas.pydata.org/) - Data manipulation library
 - [openpyxl](https://openpyxl.readthedocs.io/) - Excel file handling
 
+## Disclaimer
+This password generator is for educational and utility purposes.  
+No guarantees are made regarding the security of generated passwords.  
+You are responsible for securely storing and managing any passwords created using this tool.  
+The authors are not liable for data loss, breaches, or other issues arising from its use.
